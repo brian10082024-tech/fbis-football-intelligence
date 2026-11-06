@@ -5,6 +5,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FBIS Football Intelligence</title>
+
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#071426;color:#edf4ff;font-family:Arial,sans-serif}
@@ -15,7 +16,7 @@ main{max-width:950px;margin:auto;padding:15px}
 .panel,.match,.analysis{background:#10233c;border:1px solid #244568;border-radius:12px;padding:15px;margin-bottom:14px}
 input,button{padding:12px;border-radius:7px;border:0;margin:5px 3px}
 input{background:#fff;color:#111}
-button{background:#087bd1;color:white;font-weight:bold}
+button{background:#087bd1;color:white;font-weight:bold;cursor:pointer}
 button:disabled{opacity:.5}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .stat{background:#17375c;padding:12px;border-radius:8px;text-align:center}
@@ -30,9 +31,19 @@ button:disabled{opacity:.5}
 .error{color:#ff9c9c}
 .note{color:#ffd27b;font-size:13px}
 .hidden{display:none}
-@media(max-width:550px){.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}
+.filters{display:flex;flex-wrap:wrap;gap:6px;margin:15px 0}
+.filters button{background:#244568}
+.filters button.active{background:#087bd1;outline:2px solid #54b8ff}
+.filter-count{font-size:12px;opacity:.85}
+.empty{text-align:center;color:#b9cde5;padding:25px}
+@media(max-width:550px){
+ .stats{grid-template-columns:repeat(2,1fr)}
+ .grid{grid-template-columns:1fr}
+ .filters button{flex:1 1 28%}
+}
 </style>
 </head>
+
 <body>
 <header>
 <h1>FBIS</h1>
@@ -40,6 +51,7 @@ button:disabled{opacity:.5}
 </header>
 
 <main>
+
 <div class="panel">
 <h3>Match Centre</h3>
 <label for="matchDate">Select match date</label><br>
@@ -56,7 +68,30 @@ button:disabled{opacity:.5}
 <div class="stat"><strong id="live">0</strong>Live</div>
 </div>
 
+<div class="panel">
+<h3>Match Filters</h3>
+<div class="filters">
+<button class="active" data-filter="upcoming" onclick="setFilter('upcoming',this)">
+Upcoming <span class="filter-count" id="upcomingCount">0</span>
+</button>
+<button data-filter="live" onclick="setFilter('live',this)">
+Live <span class="filter-count" id="liveCount">0</span>
+</button>
+<button data-filter="finished" onclick="setFilter('finished',this)">
+Finished <span class="filter-count" id="finishedCount">0</span>
+</button>
+<button data-filter="postponed" onclick="setFilter('postponed',this)">
+Postponed <span class="filter-count" id="postponedCount">0</span>
+</button>
+<button data-filter="all" onclick="setFilter('all',this)">
+All <span class="filter-count" id="allCount">0</span>
+</button>
+</div>
+<p id="filterStatus">Showing upcoming matches.</p>
+</div>
+
 <div id="matches"></div>
+
 </main>
 
 <script>
@@ -65,188 +100,269 @@ const API="https://fbis-football-intelligence.onrender.com";
 const dateInput=document.getElementById("matchDate");
 dateInput.value=new Date().toLocaleDateString("en-CA");
 
+let allMatches=[];
+let currentFilter="upcoming";
+
 function getRows(data){
-if(Array.isArray(data))return data;
-if(Array.isArray(data?.data))return data.data;
-if(Array.isArray(data?.matches))return data.matches;
-if(Array.isArray(data?.results))return data.results;
-return [];
+ if(Array.isArray(data))return data;
+ if(Array.isArray(data?.data))return data.data;
+ if(Array.isArray(data?.matches))return data.matches;
+ if(Array.isArray(data?.results))return data.results;
+ return [];
 }
 
 function esc(value){
-return String(value??"").replace(/[&<>"']/g,c=>({
-"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-}[c]));
+ return String(value??"").replace(/[&<>"']/g,c=>({
+  "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+ }[c]));
+}
+
+function getCategory(status){
+ const s=String(status||"").toLowerCase();
+
+ if(/postponed|cancelled|canceled|abandoned|suspended/.test(s))
+  return "postponed";
+
+ if(/finished|full time|after penalties|ended/.test(s))
+  return "finished";
+
+ if(/live|playing|in progress|first half|second half|half time|extra time|penalty shootout|break/.test(s))
+  return "live";
+
+ if(/not started|scheduled|fixture|pending/.test(s))
+  return "upcoming";
+
+ return "other";
+}
+
+function setFilter(filter,button){
+ currentFilter=filter;
+
+ document.querySelectorAll(".filters button").forEach(b=>{
+  b.classList.remove("active");
+ });
+
+ if(button)button.classList.add("active");
+
+ renderMatches();
+}
+
+function updateFilterCounts(){
+ const counts={
+  upcoming:0,
+  live:0,
+  finished:0,
+  postponed:0,
+  all:allMatches.length
+ };
+
+ allMatches.forEach(m=>{
+  const category=getCategory(m.status);
+  if(counts[category]!==undefined)counts[category]++;
+ });
+
+ document.getElementById("upcomingCount").textContent=counts.upcoming;
+ document.getElementById("liveCount").textContent=counts.live;
+ document.getElementById("finishedCount").textContent=counts.finished;
+ document.getElementById("postponedCount").textContent=counts.postponed;
+ document.getElementById("allCount").textContent=counts.all;
+
+ document.getElementById("live").textContent=counts.live;
+}
+
+function renderMatches(){
+ const container=document.getElementById("matches");
+
+ let filtered=allMatches.filter(m=>{
+  if(currentFilter==="all")return true;
+  return getCategory(m.status)===currentFilter;
+ });
+
+ if(currentFilter==="upcoming"){
+  filtered.sort((a,b)=>new Date(a.date)-new Date(b.date));
+ }
+
+ document.getElementById("filterStatus").textContent=
+  `Showing ${filtered.length} ${currentFilter} matches.`;
+
+ if(!filtered.length){
+  container.innerHTML=`<div class="panel empty">No ${esc(currentFilter)} matches found for this date.</div>`;
+  return;
+ }
+
+ container.innerHTML=filtered.map(m=>`
+  <div class="match">
+   <h3>${esc(m.home)} vs ${esc(m.away)}</h3>
+   <p class="meta">${esc(m.league)} · ${esc(m.country)}</p>
+   <p class="meta">${esc(m.date)} · ${esc(m.status)}</p>
+   <p>Score: ${esc(m.score||"Not available")}</p>
+   <button onclick="analyzeMatch(${Number(m.homeTeamId)},${Number(m.awayTeamId)},this)">
+    Analyze Match
+   </button>
+   <div class="analysis hidden"></div>
+  </div>
+ `).join("");
 }
 
 async function loadMatches(){
-const date=dateInput.value;
-if(!date)return;
+ const date=dateInput.value;
+ if(!date)return;
 
-const container=document.getElementById("matches");
-container.innerHTML="";
-document.getElementById("status").textContent="Loading fixtures...";
+ const container=document.getElementById("matches");
+ container.innerHTML="";
+ document.getElementById("status").textContent="Loading fixtures...";
 
-try{
-const response=await fetch(`${API}/matches?date=${encodeURIComponent(date)}`);
-const data=await response.json();
-if(!response.ok)throw new Error(data.error||"Could not load fixtures");
+ try{
+  const response=await fetch(`${API}/matches?date=${encodeURIComponent(date)}`);
+  const data=await response.json();
 
-const matches=data.matches||[];
-document.getElementById("total").textContent=matches.length;
-document.getElementById("countries").textContent=new Set(matches.map(m=>m.country)).size;
-document.getElementById("leagues").textContent=new Set(matches.map(m=>m.league)).size;
-document.getElementById("live").textContent=matches.filter(m=>
-/live|playing|half/i.test(m.status||"")
-).length;
+  if(!response.ok)throw new Error(data.error||"Could not load fixtures");
 
-document.getElementById("status").textContent=
-`${matches.length} matches loaded for ${date}.`;
+  allMatches=data.matches||[];
 
-if(!matches.length){
-container.innerHTML="<p>No matches found for this date.</p>";
-return;
-}
+  document.getElementById("total").textContent=allMatches.length;
+  document.getElementById("countries").textContent=
+   new Set(allMatches.map(m=>m.country)).size;
+  document.getElementById("leagues").textContent=
+   new Set(allMatches.map(m=>m.league)).size;
 
-container.innerHTML=matches.map((m,i)=>`
-<div class="match">
-<h3>${esc(m.home)} vs ${esc(m.away)}</h3>
-<p class="meta">${esc(m.league)} · ${esc(m.country)}</p>
-<p class="meta">${esc(m.date)} · ${esc(m.status)}</p>
-<p>Score: ${esc(m.score||"Not available")}</p>
-<button onclick="analyzeMatch(${Number(m.homeTeamId)},${Number(m.awayTeamId)},this)">
-Analyze Match
-</button>
-<div class="analysis hidden"></div>
-</div>
-`).join("");
+  updateFilterCounts();
 
-}catch(error){
-document.getElementById("status").innerHTML=
-`<span class="error">${esc(error.message)}</span>`;
-}
+  document.getElementById("status").textContent=
+   `${allMatches.length} matches loaded for ${date}.`;
+
+  renderMatches();
+
+ }catch(error){
+  document.getElementById("status").innerHTML=
+   `<span class="error">${esc(error.message)}</span>`;
+ }
 }
 
 function summarizeForm(data,id){
-const rows=getRows(data);
-let wins=0,draws=0,losses=0,gf=0,ga=0,played=0;
+ const rows=getRows(data);
+ let wins=0,draws=0,losses=0,gf=0,ga=0,played=0;
 
-for(const m of rows){
-const score=m.state?.score?.current;
-if(!score)continue;
+ for(const m of rows){
+  const score=m.state?.score?.current;
+  if(!score)continue;
 
-const parts=String(score).split("-").map(Number);
-if(parts.length!==2||parts.some(n=>!Number.isFinite(n)))continue;
+  const parts=String(score).split("-").map(Number);
+  if(parts.length!==2||parts.some(n=>!Number.isFinite(n)))continue;
 
-const home=Number(m.homeTeam?.id)===Number(id);
-const away=Number(m.awayTeam?.id)===Number(id);
-if(!home&&!away)continue;
+  const home=Number(m.homeTeam?.id)===Number(id);
+  const away=Number(m.awayTeam?.id)===Number(id);
+  if(!home&&!away)continue;
 
-const scored=home?parts[0]:parts[1];
-const conceded=home?parts[1]:parts[0];
+  const scored=home?parts[0]:parts[1];
+  const conceded=home?parts[1]:parts[0];
 
-gf+=scored;
-ga+=conceded;
-played++;
+  gf+=scored;
+  ga+=conceded;
+  played++;
 
-if(scored>conceded)wins++;
-else if(scored===conceded)draws++;
-else losses++;
-}
+  if(scored>conceded)wins++;
+  else if(scored===conceded)draws++;
+  else losses++;
+ }
 
-return {played,wins,draws,losses,gf,ga};
+ return {played,wins,draws,losses,gf,ga};
 }
 
 async function analyzeMatch(homeId,awayId,button){
-const panel=button.nextElementSibling;
-panel.classList.remove("hidden");
-panel.innerHTML="<p>Loading team form, H2H and probabilities...</p>";
-button.disabled=true;
+ const panel=button.nextElementSibling;
+ panel.classList.remove("hidden");
+ panel.innerHTML="<p>Loading team form, H2H and probabilities...</p>";
+ button.disabled=true;
 
-try{
-const [homeResponse,awayResponse,h2hResponse,predictionResponse]=
-await Promise.all([
-fetch(`${API}/team-form/${homeId}`),
-fetch(`${API}/team-form/${awayId}`),
-fetch(`${API}/h2h?team1=${homeId}&team2=${awayId}`),
-fetch(`${API}/predict?home=${homeId}&away=${awayId}`)
-]);
+ try{
+  const [homeResponse,awayResponse,h2hResponse,predictionResponse]=
+  await Promise.all([
+   fetch(`${API}/team-form/${homeId}`),
+   fetch(`${API}/team-form/${awayId}`),
+   fetch(`${API}/h2h?team1=${homeId}&team2=${awayId}`),
+   fetch(`${API}/predict?home=${homeId}&away=${awayId}`)
+  ]);
 
-const [homeData,awayData,h2hData,prediction]=await Promise.all([
-homeResponse.json(),awayResponse.json(),
-h2hResponse.json(),predictionResponse.json()
-]);
+  const [homeData,awayData,h2hData,prediction]=await Promise.all([
+   homeResponse.json(),
+   awayResponse.json(),
+   h2hResponse.json(),
+   predictionResponse.json()
+  ]);
 
-if(!homeResponse.ok)throw new Error("Home team form unavailable");
-if(!awayResponse.ok)throw new Error("Away team form unavailable");
+  if(!homeResponse.ok)throw new Error("Home team form unavailable");
+  if(!awayResponse.ok)throw new Error("Away team form unavailable");
 
-const h=summarizeForm(homeData,homeId);
-const a=summarizeForm(awayData,awayId);
-const h2h=getRows(h2hData);
+  const h=summarizeForm(homeData,homeId);
+  const a=summarizeForm(awayData,awayId);
+  const h2h=getRows(h2hData);
 
-let homeWins=0,draws=0,awayWins=0;
+  let homeWins=0,draws=0,awayWins=0;
 
-for(const m of h2h){
-const score=m.state?.score?.current;
-if(!score)continue;
-const parts=String(score).split("-").map(Number);
-if(parts.length!==2||parts.some(n=>!Number.isFinite(n)))continue;
+  for(const m of h2h){
+   const score=m.state?.score?.current;
+   if(!score)continue;
 
-if(parts[0]>parts[1])homeWins++;
-else if(parts[0]===parts[1])draws++;
-else awayWins++;
-}
+   const parts=String(score).split("-").map(Number);
+   if(parts.length!==2||parts.some(n=>!Number.isFinite(n)))continue;
 
-let probabilityHTML="";
+   if(parts[0]>parts[1])homeWins++;
+   else if(parts[0]===parts[1])draws++;
+   else awayWins++;
+  }
 
-if(predictionResponse.ok){
-const p=prediction.probabilities;
-probabilityHTML=`
-<h3>Probability Estimates</h3>
-<div class="grid">
-<div class="metric">Home win<strong>${p.homeWin}%</strong></div>
-<div class="metric">Draw<strong>${p.draw}%</strong></div>
-<div class="metric">Away win<strong>${p.awayWin}%</strong></div>
-<div class="metric">BTTS Yes<strong>${p.bttsYes}%</strong></div>
-<div class="metric">Over 1.5 goals<strong>${p.over15}%</strong></div>
-<div class="metric">Over 2.5 goals<strong>${p.over25}%</strong></div>
-<div class="metric">Under 3.5 goals<strong>${p.under35}%</strong></div>
-</div>
-<p>Expected goals: Home ${prediction.estimatedGoals.home} · Away ${prediction.estimatedGoals.away}</p>
-<p class="note">${esc(prediction.warning)}</p>
-`;
-}else{
-probabilityHTML=`
-<h3>Probability Estimates</h3>
-<p class="note">${esc(prediction.error||"Probability data unavailable")}</p>
-`;
-}
+  let probabilityHTML="";
 
-panel.innerHTML=`
-<h3>Recent Form</h3>
-<div class="grid">
-<div class="metric">
-Home team
-<p>${h.wins} wins · ${h.draws} draws · ${h.losses} losses</p>
-<p>Goals: ${h.gf} scored · ${h.ga} conceded</p>
-</div>
-<div class="metric">
-Away team
-<p>${a.wins} wins · ${a.draws} draws · ${a.losses} losses</p>
-<p>Goals: ${a.gf} scored · ${a.ga} conceded</p>
-</div>
-</div>
-<h3>Head-to-Head</h3>
-<p>Meetings found: ${h2h.length}</p>
-<p>Home wins: ${homeWins} · Draws: ${draws} · Away wins: ${awayWins}</p>
-${probabilityHTML}
-`;
+  if(predictionResponse.ok&&prediction.probabilities){
+   const p=prediction.probabilities;
 
-}catch(error){
-panel.innerHTML=`<p class="error">${esc(error.message)}</p>`;
-}finally{
-button.disabled=false;
-}
+   probabilityHTML=`
+    <h3>Probability Estimates</h3>
+    <div class="grid">
+     <div class="metric">Home win<strong>${p.homeWin}%</strong></div>
+     <div class="metric">Draw<strong>${p.draw}%</strong></div>
+     <div class="metric">Away win<strong>${p.awayWin}%</strong></div>
+     <div class="metric">BTTS Yes<strong>${p.bttsYes}%</strong></div>
+     <div class="metric">Over 1.5 goals<strong>${p.over15}%</strong></div>
+     <div class="metric">Over 2.5 goals<strong>${p.over25}%</strong></div>
+     <div class="metric">Under 3.5 goals<strong>${p.under35}%</strong></div>
+    </div>
+    <p>Expected goals: Home ${prediction.estimatedGoals.home} · Away ${prediction.estimatedGoals.away}</p>
+    <p class="note">${esc(prediction.warning)}</p>
+   `;
+  }else{
+   probabilityHTML=`
+    <h3>Probability Estimates</h3>
+    <p class="note">${esc(prediction.error||"Probability data unavailable")}</p>
+   `;
+  }
+
+  panel.innerHTML=`
+   <h3>Recent Form</h3>
+   <div class="grid">
+    <div class="metric">
+     Home team
+     <p>${h.wins} wins · ${h.draws} draws · ${h.losses} losses</p>
+     <p>Goals: ${h.gf} scored · ${h.ga} conceded</p>
+    </div>
+    <div class="metric">
+     Away team
+     <p>${a.wins} wins · ${a.draws} draws · ${a.losses} losses</p>
+     <p>Goals: ${a.gf} scored · ${a.ga} conceded</p>
+    </div>
+   </div>
+   <h3>Head-to-Head</h3>
+   <p>Meetings found: ${h2h.length}</p>
+   <p>Home wins: ${homeWins} · Draws: ${draws} · Away wins: ${awayWins}</p>
+   ${probabilityHTML}
+  `;
+
+ }catch(error){
+  panel.innerHTML=`<p class="error">${esc(error.message)}</p>`;
+ }finally{
+  button.disabled=false;
+ }
 }
 
 loadMatches();
