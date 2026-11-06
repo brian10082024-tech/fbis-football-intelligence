@@ -110,7 +110,68 @@ app.get("/matches", async (req, res) => {
     });
   }
 });
+// TEAM'S LAST FIVE MATCHES
+app.get("/team-form/:teamId", async (req, res) => {
+  const teamId = req.params.teamId;
 
+  if (!/^\d+$/.test(teamId)) {
+    return res.status(400).json({ error: "Invalid team ID" });
+  }
+
+  try {
+    const url = new URL("https://soccer.highlightly.net/last-five-games");
+    url.searchParams.set("teamId", teamId);
+
+    const response = await fetch(url, {
+      headers: {
+        "x-rapidapi-key": process.env.HIGHLIGHTLY_API_KEY
+      }
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
+
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// HEAD-TO-HEAD RECORD
+app.get("/h2h", async (req, res) => {
+  const { team1, team2 } = req.query;
+
+  if (!/^\d+$/.test(team1 || "") || !/^\d+$/.test(team2 || "")) {
+    return res.status(400).json({
+      error: "Provide two valid team IDs"
+    });
+  }
+
+  try {
+    const url = new URL("https://soccer.highlightly.net/head-2-head");
+    url.searchParams.set("teamIdOne", team1);
+    url.searchParams.set("teamIdTwo", team2);
+
+    const response = await fetch(url, {
+      headers: {
+        "x-rapidapi-key": process.env.HIGHLIGHTLY_API_KEY
+      }
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
+
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 app.listen(PORT, () => {
   console.log(`FBIS API running on port ${PORT}`);
 });
