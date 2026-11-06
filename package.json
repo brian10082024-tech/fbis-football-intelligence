@@ -1,1 +1,13 @@
 
+{
+  "name": "fbis-api",
+  "version": "1.0.0",
+  "description": "Football Betting Intelligence System API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
