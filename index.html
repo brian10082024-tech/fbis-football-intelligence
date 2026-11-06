@@ -29,6 +29,10 @@ h2{font-size:18px;margin:22px 0 12px}
 .teams div:last-child{text-align:right}
 .score{color:#facc15;white-space:nowrap}
 .meta{display:flex;justify-content:space-between;gap:8px;margin-top:12px;color:#94a3b8;font-size:12px}
+.analyze{margin-top:14px;width:100%}
+.analysis{display:none;margin-top:14px;padding:13px;background:#0b1220;border-radius:8px;font-size:13px;line-height:1.7}
+.analysis h3{color:#38bdf8;margin:12px 0 5px}
+.analysis p{margin:5px 0}
 .empty{text-align:center;padding:30px;color:#94a3b8}
 footer{text-align:center;padding:25px;color:#64748b;font-size:12px}
 @media(min-width:650px){.stats{grid-template-columns:repeat(4,1fr)}}
@@ -84,12 +88,9 @@ async function loadMatches(){
    const response = await fetch(
      `${API_URL}/matches?date=${encodeURIComponent(date)}`
    );
-
    const result = await response.json();
 
-   if(!response.ok){
-     throw new Error(result.error || "Could not load matches");
-   }
+   if(!response.ok) throw new Error(result.error || "Could not load matches");
 
    const matches = result.matches || [];
 
@@ -131,17 +132,152 @@ async function loadMatches(){
            <span>${escapeHTML(m.status || "Unknown")}</span>
            <span>${escapeHTML(time)} (local)</span>
          </div>
+         <button class="analyze"
+           data-home-id="${Number(m.homeTeamId)}"
+           data-away-id="${Number(m.awayTeamId)}"
+           data-home="${escapeHTML(m.home || "")}"
+           data-away="${escapeHTML(m.away || "")}"
+           data-match-id="${escapeHTML(String(m.id))}">
+           Analyze Match
+         </button>
+         <div class="analysis" id="analysis-${escapeHTML(String(m.id))}"></div>
        </div>
      `;
    }).join("");
+
+   document.querySelectorAll(".analyze").forEach(button=>{
+     button.addEventListener("click",()=>{
+       analyzeMatch(button);
+     });
+   });
 
  }catch(error){
    message.textContent = "Error: " + error.message;
  }
 }
 
+function getRows(data){
+ if(Array.isArray(data)) return data;
+ if(Array.isArray(data.data)) return data.data;
+ if(Array.isArray(data.matches)) return data.matches;
+ return [];
+}
+
+function getScore(match){
+ const value = match.state?.score?.current;
+ if(!value) return null;
+ const parts = String(value).split("-");
+ if(parts.length !== 2) return null;
+ const home = Number(parts[0].trim());
+ const away = Number(parts[1].trim());
+ if(!Number.isFinite(home) || !Number.isFinite(away)) return null;
+ return {home,away};
+}
+
+function summarizeForm(matches,teamId){
+ let wins=0,draws=0,losses=0,scored=0,conceded=0,played=0;
+
+ matches.forEach(match=>{
+   const score=getScore(match);
+   if(!score) return;
+
+   const homeId=Number(match.homeTeam?.id);
+   const awayId=Number(match.awayTeam?.id);
+
+   let goalsFor,goalsAgainst;
+
+   if(homeId===teamId){
+     goalsFor=score.home;
+     goalsAgainst=score.away;
+   }else if(awayId===teamId){
+     goalsFor=score.away;
+     goalsAgainst=score.home;
+   }else{
+     return;
+   }
+
+   played++;
+   scored+=goalsFor;
+   conceded+=goalsAgainst;
+
+   if(goalsFor>goalsAgainst) wins++;
+   else if(goalsFor===goalsAgainst) draws++;
+   else losses++;
+ });
+
+ return {wins,draws,losses,scored,conceded,played};
+}
+
+function formText(name,form){
+ if(form.played===0) return `<p><b>${escapeHTML(name)}:</b> No completed matches found.</p>`;
+
+ return `
+ <p><b>${escapeHTML(name)}</b></p>
+ <p>Wins: ${form.wins} | Draws: ${form.draws} | Losses: ${form.losses}</p>
+ <p>Goals scored: ${form.scored} | Goals conceded: ${form.conceded}</p>
+ <p>Points: ${form.wins*3+form.draws} / ${form.played*3}</p>
+ `;
+}
+
+async function analyzeMatch(button){
+ const homeId=Number(button.dataset.homeId);
+ const awayId=Number(button.dataset.awayId);
+ const home=button.dataset.home;
+ const away=button.dataset.away;
+ const panel=document.getElementById("analysis-"+button.dataset.matchId);
+
+ if(!homeId || !awayId){
+   panel.style.display="block";
+   panel.textContent="Team IDs are missing for this match.";
+   return;
+ }
+
+ panel.style.display="block";
+ panel.innerHTML="Loading recent form and H2H data...";
+ button.disabled=true;
+
+ try{
+   const [homeResponse,awayResponse,h2hResponse]=await Promise.all([
+     fetch(`${API_URL}/team-form/${homeId}`),
+     fetch(`${API_URL}/team-form/${awayId}`),
+     fetch(`${API_URL}/h2h?team1=${homeId}&team2=${awayId}`)
+   ]);
+
+   const [homeData,awayData,h2hData]=await Promise.all([
+     homeResponse.json(),awayResponse.json(),h2hResponse.json()
+   ]);
+
+   if(!homeResponse.ok) throw new Error("Home team form could not be loaded.");
+   if(!awayResponse.ok) throw new Error("Away team form could not be loaded.");
+   if(!h2hResponse.ok) throw new Error("H2H data could not be loaded.");
+
+   const homeForm=summarizeForm(getRows(homeData),homeId);
+   const awayForm=summarizeForm(getRows(awayData),awayId);
+
+   const meetings=getRows(h2hData);
+   const h2h=summarizeForm(meetings,homeId);
+
+   panel.innerHTML=`
+     <h3>Recent form</h3>
+     ${formText(home,homeForm)}
+     ${formText(away,awayForm)}
+     <h3>Head-to-head</h3>
+     <p>Meetings found: ${h2h.played}</p>
+     <p>${escapeHTML(home)} wins: ${h2h.wins}</p>
+     <p>Draws: ${h2h.draws}</p>
+     <p>${escapeHTML(away)} wins: ${h2h.losses}</p>
+     <p><b>Note:</b> These are historical records, not predictions. No probability or betting recommendation is generated yet.</p>
+   `;
+
+ }catch(error){
+   panel.textContent="Analysis error: "+error.message;
+ }finally{
+   button.disabled=false;
+ }
+}
+
 function escapeHTML(value){
- return String(value).replace(/[&<>"']/g, c=>({
+ return String(value).replace(/[&<>"']/g,c=>({
    "&":"&amp;","<":"&lt;",">":"&gt;",
    '"':"&quot;","'":"&#39;"
  })[c]);
